@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parkinson"
+version = "0.1.0"
+description = "Workspace package for the Parkinson true-OFF prediction experiments."
+requires-python = ">=3.14"
+
+[tool.setuptools.packages.find]
+where = ["src"]
