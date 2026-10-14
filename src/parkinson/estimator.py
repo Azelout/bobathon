@@ -8,6 +8,10 @@ Implémente les six blocs de la stratégie décrite dans journal/STRATEGIE.md :
 4. Variables par patient : droite pondérée + résumés + enveloppe 90 colonnes
 5. HistGradientBoostingRegressor
 6. Post-traitement par patient : parabole → isotonique → clip [0, 132]
+
+Options supplémentaires (expérience 03) :
+- sens_neighbors : a priori bayésien de sensibilité emprunté aux voisins en âge au diagnostic.
+- use_posterior : OneSidedPosterior empilé hors pli (post_mean, post_sd).
 """
 from __future__ import annotations
 
@@ -138,12 +142,11 @@ def _fit_drug_curve(df: pd.DataFrame) -> dict:
     return curve
 
 
-def _add_on_equivalent(df: pd.DataFrame, curve: dict, lam: float = 1.0) -> pd.DataFrame:
+def _fit_sens_reference(df: pd.DataFrame, curve: dict, lam: float = 1.0) -> pd.DataFrame:
     """
-    Calcule la sensibilité par patient (shrunk mean residual) et on_eq = on * exp(-(courbe+sens)).
+    Construit la table de référence des patients avec au moins une visite double.
 
-    La sensibilité est calculée à la volée sur les données passées — les patients de
-    validation utilisent donc leurs propres visites doubles (sans cible, légitime selon P2).
+    Colonnes de sortie : patient_id, age_at_diagnosis, r_j (résidu moyen), w_j (poids).
     """
     doubles = df[
         df["off"].notna() & df["on"].notna() & (df["off"] >= 8) & (df["on"] >= 1)
@@ -153,12 +156,126 @@ def _add_on_equivalent(df: pd.DataFrame, curve: dict, lam: float = 1.0) -> pd.Da
     doubles["residual"] = doubles["log_ratio"] - doubles["curve_val"]
 
     agg = doubles.groupby("patient_id")["residual"].agg(["sum", "count"])
-    sens_map = (agg["sum"] / (agg["count"] + lam)).to_dict()
+    agg = agg[agg["count"] >= 1].copy()
+    agg["r_j"] = agg["sum"] / agg["count"]
+    agg["w_j"] = agg["count"] / (agg["count"] + lam)
+
+    # Récupérer age_at_diagnosis (première valeur non nulle par patient)
+    age_diag = (
+        df[df["age_at_diagnosis"].notna()]
+        .groupby("patient_id")["age_at_diagnosis"]
+        .first()
+    )
+    ref = agg.join(age_diag, how="left")
+    return ref[["r_j", "w_j", "age_at_diagnosis"]].reset_index()
+
+
+def _compute_sens_prior(
+    patient_ages: np.ndarray,
+    patient_ids: np.ndarray,
+    ref: pd.DataFrame,
+    sigma: float = 0.05,
+    beta: float = 0.5,
+) -> np.ndarray:
+    """
+    Calcule l'a priori de sensibilité pour chaque ligne.
+
+    Parameters
+    ----------
+    patient_ages : 1-D array of float, age_at_diagnosis par ligne (NaN si manquant).
+    patient_ids : 1-D array, patient_id par ligne.
+    ref : DataFrame de la table de référence (patient_id, age_at_diagnosis, r_j, w_j).
+    sigma : écart-type du noyau gaussien (en années).
+    beta : pseudo-count d'a priori.
+    """
+    prior = np.zeros(len(patient_ages))
+
+    # Construire un mapping patient_id → age_at_diagnosis (représentant unique par patient)
+    # et patient_id → sum_residuals, count pour éviter l'auto-influence
+    ref_pid = ref["patient_id"].values
+    ref_age = ref["age_at_diagnosis"].values
+    ref_r = ref["r_j"].values
+    ref_w = ref["w_j"].values
+
+    # Index de la table de référence par patient_id (pour l'exclusion du patient lui-même)
+    ref_pid_set = {pid: i for i, pid in enumerate(ref_pid)}
+
+    for row_i in range(len(patient_ages)):
+        a = patient_ages[row_i]
+        pid = patient_ids[row_i]
+        if np.isnan(a):
+            prior[row_i] = 0.0
+            continue
+
+        # Calculer les poids du noyau pour tous les patients de référence
+        diff = ref_age - a
+        valid = ~np.isnan(diff)
+        k = np.where(valid, np.exp(-0.5 * (diff / sigma) ** 2), 0.0)
+
+        # Exclure le patient lui-même
+        if pid in ref_pid_set:
+            k[ref_pid_set[pid]] = 0.0
+
+        wk = ref_w * k
+        num = np.sum(wk * ref_r)
+        denom = np.sum(wk) + beta
+        prior[row_i] = num / denom if denom > 0 else 0.0
+
+    return prior
+
+
+def _add_on_equivalent(
+    df: pd.DataFrame,
+    curve: dict,
+    lam: float = 1.0,
+    sens_neighbors: bool = False,
+    sens_ref: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """
+    Calcule la sensibilité par patient (shrunk mean residual) et on_eq = on * exp(-(courbe+sens)).
+
+    Si sens_neighbors=True, la sensibilité utilise un a priori bayésien emprunté aux
+    patients d'entraînement voisins en age_at_diagnosis (table sens_ref fournie en fit).
+    En predict, sens_ref provient toujours du train seul → isolation préservée.
+    """
+    doubles = df[
+        df["off"].notna() & df["on"].notna() & (df["off"] >= 8) & (df["on"] >= 1)
+    ].copy()
+    doubles["log_ratio"] = np.log(doubles["on"] / doubles["off"])
+    doubles["curve_val"] = doubles["hb"].map(curve).fillna(0.0)
+    doubles["residual"] = doubles["log_ratio"] - doubles["curve_val"]
+
+    agg = doubles.groupby("patient_id")["residual"].agg(["sum", "count"])
     nboth_map = agg["count"].to_dict()
 
     out = df.copy()
-    out["sens"] = df["patient_id"].map(sens_map).fillna(0.0)
     out["nboth"] = df["patient_id"].map(nboth_map).fillna(0).astype(int)
+
+    if sens_neighbors and sens_ref is not None:
+        # A priori bayésien
+        patient_ages = df["age_at_diagnosis"].values.astype(float)
+        patient_ids = df["patient_id"].values
+        prior_vals = _compute_sens_prior(patient_ages, patient_ids, sens_ref)
+
+        # Sensibilité = (sum + 2*prior) / (count + 2)
+        sum_map = agg["sum"].to_dict()
+        count_map = agg["count"].to_dict()
+
+        sens_vals = np.zeros(len(df))
+        for row_i, pid in enumerate(df["patient_id"].values):
+            s = sum_map.get(pid, 0.0)
+            c = count_map.get(pid, 0)
+            sens_vals[row_i] = (s + 2.0 * prior_vals[row_i]) / (c + 2.0)
+
+        out["sens"] = sens_vals
+        out["sens_prior"] = prior_vals
+    else:
+        sens_map = (agg["sum"] / (agg["count"] + lam)).to_dict()
+        out["sens"] = df["patient_id"].map(sens_map).fillna(0.0)
+        if sens_neighbors:
+            # sens_neighbors=True mais pas de référence (cas de la table vide)
+            out["sens_prior"] = 0.0
+
     out["on_eq"] = df["on"] * np.exp(-(df["hb"].map(curve).fillna(0.0) + out["sens"]))
     return out
 
@@ -415,6 +532,426 @@ def _envelope_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Bloc 7 — Modèle bayésien OneSidedPosterior
+# ---------------------------------------------------------------------------
+
+# Grilles
+_L_GRID = np.arange(0.0, 130.5, 0.5)   # 261 valeurs
+_S_GRID = np.arange(0.0, 12.25, 0.25)  # 49 valeurs
+_C_GRID = np.arange(-0.3, 0.31, 0.1)   # 7 valeurs
+
+# Tranches de cible pour la densité de bruit
+_T_EDGES = [0.0, 10.0, 20.0, 30.0, 45.0, 60.0, np.inf]
+
+# Tranches de T pour la vraisemblance de début de traitement
+_TREAT_T_EDGES = [0.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0, 40.0, np.inf]
+_TREAT_DUR_EDGES = [-np.inf, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, np.inf]
+
+
+def _smooth_density(counts: np.ndarray, sigma_bins: float = 2.5, floor: float = 0.02) -> np.ndarray:
+    """Lisse un histogramme par noyau gaussien discret (±3σ tronqué)."""
+    half = int(np.ceil(3 * sigma_bins))
+    kernel_x = np.arange(-half, half + 1)
+    kernel = np.exp(-0.5 * (kernel_x / sigma_bins) ** 2)
+    kernel /= kernel.sum()
+    smoothed = np.convolve(counts.astype(float), kernel, mode="same")
+    smoothed += floor
+    # Normaliser en densité (intégrale = 1 sur l'intervalle [0, 2], pas = 0.01)
+    smoothed /= smoothed.sum() * 0.01
+    return smoothed
+
+
+def _z_density(z_vals: np.ndarray, floor: float = 0.02) -> np.ndarray:
+    """
+    Estime la densité empirique sur z ∈ [0, 2] par pas de 0.01 (201 bins).
+    Retourne un array de 201 valeurs de densité.
+    """
+    z_clipped = np.clip(z_vals, 0.0, 2.0)
+    counts, _ = np.histogram(z_clipped, bins=201, range=(0.0, 2.0))
+    return _smooth_density(counts)
+
+
+def _t_bin(T_val: float) -> int:
+    """Index de tranche de cible pour la densité de bruit."""
+    for i, edge in enumerate(_T_EDGES[1:]):
+        if T_val < edge:
+            return i
+    return len(_T_EDGES) - 2
+
+
+def _assign_bin_scalar(val: float, edges: list) -> int:
+    """Cherche le bin d'une valeur scalaire dans une liste de bords."""
+    for i in range(len(edges) - 1):
+        if edges[i] <= val < edges[i + 1]:
+            return i
+    return len(edges) - 2
+
+
+class OneSidedPosterior(BaseEstimator):
+    """
+    Modèle bayésien par patient sur une grille L×S×C.
+
+    Utilise les colonnes : treat, dur, on_eq, nboth, off, rater_id,
+    time_since_intake_on (déjà calculées par les blocs 1-2).
+
+    Parameters
+    ----------
+    None — tous les paramètres sont appris dans fit.
+    """
+
+    def fit(self, df: pd.DataFrame, y: pd.Series) -> "OneSidedPosterior":
+        """
+        Apprend les densités de bruit, la table de traitement et les a priori.
+
+        Parameters
+        ----------
+        df : DataFrame avec les colonnes blocs 1-2 + rater_id + age_at_diagnosis.
+        y : cible (true OFF score).
+        """
+        y_arr = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
+
+        # ------------------------------------------------------------------
+        # Échelle par évaluateur : médiane de off/cible sur visites avec off et cible > 20
+        # ------------------------------------------------------------------
+        df2 = df.copy()
+        df2["target"] = y_arr
+        valid_scale = df2[df2["off"].notna() & (df2["target"] > 20)].copy()
+        valid_scale["ratio"] = valid_scale["off"] / valid_scale["target"]
+        self.rater_scale_ = valid_scale.groupby("rater_id")["ratio"].median().to_dict()
+        self.global_scale_ = float(valid_scale["ratio"].median()) if len(valid_scale) > 0 else 1.0
+
+        # ------------------------------------------------------------------
+        # Densités empiriques de bruit pour off
+        # ------------------------------------------------------------------
+        # Une densité par tranche de T et par treat (0/1)
+        n_tbins = len(_T_EDGES) - 1
+        # off_densities[treat_val][t_bin] = array 201
+        self.off_densities_: dict[int, list] = {0: [], 1: []}
+        for treat_val in [0, 1]:
+            for t_bin_i in range(n_tbins):
+                sub = df2[
+                    df2["off"].notna()
+                    & (df2["treat"] == treat_val)
+                    & (df2["target"] > 0)
+                ].copy()
+                # filtre tranche de T (target utilisée comme proxy de T ici)
+                t_lo = _T_EDGES[t_bin_i]
+                t_hi = _T_EDGES[t_bin_i + 1]
+                sub_t = sub[(sub["target"] >= t_lo) & (sub["target"] < t_hi)]
+                if len(sub_t) < 5:
+                    sub_t = sub  # fallback global
+                scale_vals = sub_t["rater_id"].map(self.rater_scale_).fillna(self.global_scale_)
+                T_proxy = sub_t["target"].values
+                T_clamped = np.maximum(T_proxy, 0.5)
+                z = sub_t["off"].values / (scale_vals.values * T_clamped)
+                self.off_densities_[treat_val].append(_z_density(z))
+
+        # ------------------------------------------------------------------
+        # Densités empiriques de bruit pour on_eq
+        # Une densité par combinaison (time_known: bool) × (nboth > 0: bool)
+        # ------------------------------------------------------------------
+        self.on_densities_: dict[tuple, list] = {}
+        for time_known in [False, True]:
+            for nboth_pos in [False, True]:
+                key = (time_known, nboth_pos)
+                self.on_densities_[key] = []
+                for t_bin_i in range(n_tbins):
+                    t_lo = _T_EDGES[t_bin_i]
+                    t_hi = _T_EDGES[t_bin_i + 1]
+                    sub = df2[
+                        df2["off"].isna()
+                        & df2["on_eq"].notna()
+                        & (df2["target"] > 0)
+                    ].copy()
+                    if time_known:
+                        sub = sub[sub["time_since_intake_on"].notna()]
+                    else:
+                        sub = sub[sub["time_since_intake_on"].isna()]
+                    if nboth_pos:
+                        sub = sub[sub["nboth"] > 0]
+                    else:
+                        sub = sub[sub["nboth"] == 0]
+                    sub_t = sub[(sub["target"] >= t_lo) & (sub["target"] < t_hi)]
+                    if len(sub_t) < 5:
+                        sub_t = sub
+                    if len(sub_t) == 0:
+                        self.on_densities_[key].append(np.ones(201) / (201 * 0.01))
+                        continue
+                    scale_vals = sub_t["rater_id"].map(self.rater_scale_).fillna(self.global_scale_)
+                    T_proxy = sub_t["target"].values
+                    T_clamped = np.maximum(T_proxy, 0.5)
+                    z = sub_t["on_eq"].values / (scale_vals.values * T_clamped)
+                    self.on_densities_[key].append(_z_density(z))
+
+        # ------------------------------------------------------------------
+        # Table de probabilité de début de traitement
+        # ------------------------------------------------------------------
+        n_treat_t = len(_TREAT_T_EDGES) - 1
+        n_treat_dur = len(_TREAT_DUR_EDGES) - 1
+
+        # Détecter les visites de "début de traitement" :
+        # treat=1 et visite précédente du même patient est treat=0 (ou première visite)
+        df_sorted = df2.sort_values(["patient_id", "age"])
+        df_sorted["prev_treat"] = df_sorted.groupby("patient_id")["treat"].shift(1).fillna(0)
+        onset = df_sorted[
+            (df_sorted["treat"] == 1) & (df_sorted["prev_treat"] == 0)
+        ].copy()
+
+        # Médiane de dur pour les dur manquantes
+        self.dur_median_ = float(df2["dur"].median()) if df2["dur"].notna().any() else 0.0
+
+        # Table de succès / effectif
+        self.treat_start_table_ = np.zeros((n_treat_t, n_treat_dur, 2))  # [:, :, 0]=succès [:, :, 1]=effectif
+
+        # Pour chaque visite où treat=0, compter les occasions
+        non_treat = df_sorted[df_sorted["treat"] == 0].copy()
+        non_treat_dur = non_treat["dur"].fillna(self.dur_median_).values
+        non_treat_T = non_treat["target"].values  # proxy T
+        for i in range(len(non_treat)):
+            tb = _assign_bin_scalar(float(non_treat_T[i]), _TREAT_T_EDGES)
+            db = _assign_bin_scalar(float(non_treat_dur[i]), _TREAT_DUR_EDGES)
+            if 0 <= tb < n_treat_t and 0 <= db < n_treat_dur:
+                self.treat_start_table_[tb, db, 1] += 1
+
+        onset_dur = onset["dur"].fillna(self.dur_median_).values
+        onset_T = onset["target"].values
+        for i in range(len(onset)):
+            tb = _assign_bin_scalar(float(onset_T[i]), _TREAT_T_EDGES)
+            db = _assign_bin_scalar(float(onset_dur[i]), _TREAT_DUR_EDGES)
+            if 0 <= tb < n_treat_t and 0 <= db < n_treat_dur:
+                self.treat_start_table_[tb, db, 0] += 1
+
+        # Probabilités de Laplace
+        denom = self.treat_start_table_[:, :, 1] + 1.0
+        self.treat_start_prob_ = np.clip(
+            (self.treat_start_table_[:, :, 0] + 0.5) / denom,
+            0.003, 0.997
+        )
+
+        # ------------------------------------------------------------------
+        # A priori niveau L : régression linéaire sur [1, dur, dur², part traitée]
+        # ------------------------------------------------------------------
+        pat_stats = []
+        for pid, grp in df2.groupby("patient_id"):
+            t_mean = float(grp["target"].mean())
+            dur_mean = float(grp["dur"].mean()) if grp["dur"].notna().any() else self.dur_median_
+            dur2 = dur_mean ** 2
+            treat_frac = float(grp["treat"].mean())
+            pat_stats.append([1.0, dur_mean, dur2, treat_frac, t_mean])
+
+        if len(pat_stats) > 4:
+            pat_arr = np.array(pat_stats)
+            X_reg = pat_arr[:, :4]
+            y_reg = pat_arr[:, 4]
+            # OLS avec régularisation
+            XtX = X_reg.T @ X_reg + 1e-4 * np.eye(4)
+            Xty = X_reg.T @ y_reg
+            self.prior_L_coef_ = np.linalg.solve(XtX, Xty)
+            resid = y_reg - X_reg @ self.prior_L_coef_
+            self.prior_L_sigma_ = float(np.std(resid) * 1.5)
+        else:
+            self.prior_L_coef_ = np.array([30.0, 0.0, 0.0, 0.0])
+            self.prior_L_sigma_ = 15.0
+
+        self.prior_L_sigma_ = max(self.prior_L_sigma_, 1.0)
+
+        # ------------------------------------------------------------------
+        # A priori pente S : histogramme des pentes linéaires
+        # ------------------------------------------------------------------
+        slopes_list = []
+        for pid, grp in df2.groupby("patient_id"):
+            targets = grp["target"].values
+            ages = grp["age"].values
+            if len(grp) < 2:
+                continue
+            age_c = ages - ages.mean()
+            try:
+                slope = float(np.polyfit(age_c, targets, 1)[0])
+            except Exception:
+                continue
+            if np.isfinite(slope):
+                slopes_list.append(slope)
+
+        if slopes_list:
+            slopes_arr = np.array(slopes_list)
+            counts_s, _ = np.histogram(slopes_arr, bins=len(_S_GRID), range=(_S_GRID[0], _S_GRID[-1]))
+            counts_s = counts_s.astype(float) + 1.0
+            self.prior_S_ = counts_s / counts_s.sum()
+        else:
+            self.prior_S_ = np.ones(len(_S_GRID)) / len(_S_GRID)
+
+        # ------------------------------------------------------------------
+        # A priori courbure C : histogramme des coefficients quadratiques
+        # ------------------------------------------------------------------
+        curv_list = []
+        for pid, grp in df2.groupby("patient_id"):
+            if len(grp) < 5:
+                continue
+            targets = grp["target"].values
+            ages = grp["age"].values
+            age_c = ages - ages.mean()
+            try:
+                coeffs = np.polyfit(age_c, targets, 2)
+                c_val = float(coeffs[0])
+            except Exception:
+                continue
+            if np.isfinite(c_val):
+                c_clipped = np.clip(c_val, _C_GRID[0], _C_GRID[-1])
+                curv_list.append(c_clipped)
+
+        if curv_list:
+            curv_arr = np.array(curv_list)
+            counts_c, _ = np.histogram(curv_arr, bins=len(_C_GRID), range=(_C_GRID[0], _C_GRID[-1]))
+            counts_c = counts_c.astype(float) + 1.0
+            self.prior_C_ = counts_c / counts_c.sum()
+        else:
+            self.prior_C_ = np.ones(len(_C_GRID)) / len(_C_GRID)
+
+        return self
+
+    def predict(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Calcule post_mean et post_sd pour chaque ligne.
+
+        Retourne un array de shape (n, 2) : [:, 0] = post_mean, [:, 1] = post_sd.
+        """
+        # Réinitialiser l'index pour garantir des index positionnels 0..n-1
+        df = df.reset_index(drop=True)
+        n = len(df)
+        post_mean = np.full(n, np.nan)
+        post_sd = np.full(n, 10.0)
+
+        for pid, grp in df.groupby("patient_id"):
+            idx = grp.index.to_numpy()
+            ages = grp["age"].values
+            age_mean = ages.mean()
+            x_pat = ages - age_mean  # x = âge − âge moyen
+
+            # A priori sur L
+            dur_m = float(grp["dur"].mean()) if grp["dur"].notna().any() else self.dur_median_
+            treat_frac = float(grp["treat"].mean())
+            reg_feat = np.array([1.0, dur_m, dur_m ** 2, treat_frac])
+            prior_L_mean = float(reg_feat @ self.prior_L_coef_)
+            prior_L_sigma = self.prior_L_sigma_
+
+            nL = len(_L_GRID)
+            nS = len(_S_GRID)
+            nC = len(_C_GRID)
+
+            # Log-a priori : shape (nL, nS, nC)
+            # L : gaussien
+            log_prior_L = -0.5 * ((_L_GRID - prior_L_mean) / prior_L_sigma) ** 2
+            log_prior_S = np.log(np.maximum(self.prior_S_, 1e-30))  # shape (nS,)
+            log_prior_C = np.log(np.maximum(self.prior_C_, 1e-30))  # shape (nC,)
+
+            # log_posterior cumulé sur les visites du patient : shape (nL, nS, nC)
+            log_post = (
+                log_prior_L[:, None, None]
+                + log_prior_S[None, :, None]
+                + log_prior_C[None, None, :]
+            )
+
+            # Récupérer l'échelle de l'évaluateur du patient
+            rater_id = grp["rater_id"].iloc[0] if "rater_id" in grp.columns else None
+            scale = self.rater_scale_.get(rater_id, self.global_scale_) if rater_id is not None else self.global_scale_
+
+            # Calcul de x² moyen du patient
+            x2_mean = float(np.mean(x_pat ** 2))
+
+            for visit_i, (vi, row) in enumerate(grp.iterrows()):
+                # T(x) = L + S*x + C*(x² − x²_mean)  →  shape (nL, nS, nC)
+                x_v = float(x_pat[visit_i])
+                x2_v = float(x_v ** 2 - x2_mean)
+
+                # T_grid[l, s, c] = L_grid[l] + S_grid[s]*x_v + C_grid[c]*x2_v
+                T_grid = (
+                    _L_GRID[:, None, None]
+                    + _S_GRID[None, :, None] * x_v
+                    + _C_GRID[None, None, :] * x2_v
+                )
+                T_grid_clamped = np.maximum(T_grid, 0.5)
+
+                # Tranche de T (pour la densité)
+                T_repr = np.median(T_grid)  # représentant approximatif
+                t_bin_i = _t_bin(float(T_repr))
+
+                treat_val = int(row["treat"]) if not pd.isna(row["treat"]) else 0
+
+                # Vraisemblance off
+                if pd.notna(row.get("off")):
+                    z_off = float(row["off"]) / (scale * T_grid_clamped)
+                    density = self.off_densities_[treat_val][t_bin_i]
+                    # z_off → index dans [0, 2] par pas 0.01
+                    z_idx = np.clip((z_off / 0.01).astype(int), 0, 200)
+                    log_lik = np.where(
+                        z_off > 2.0,
+                        -30.0,
+                        np.log(np.maximum(density[z_idx], 1e-30)) - np.log(scale * T_grid_clamped)
+                    )
+                    log_post += log_lik
+
+                # Vraisemblance on_eq (seulement si off manquant)
+                elif pd.notna(row.get("on_eq")):
+                    time_known = pd.notna(row.get("time_since_intake_on"))
+                    nboth_pos = int(row.get("nboth", 0)) > 0
+                    key = (time_known, nboth_pos)
+                    density = self.on_densities_.get(key, self.on_densities_[(False, False)])[t_bin_i]
+                    z_on = float(row["on_eq"]) / (scale * T_grid_clamped)
+                    z_idx = np.clip((z_on / 0.01).astype(int), 0, 200)
+                    log_lik = np.where(
+                        z_on > 2.0,
+                        -30.0,
+                        np.log(np.maximum(density[z_idx], 1e-30)) - np.log(scale * T_grid_clamped)
+                    )
+                    log_post += log_lik
+
+                # Vraisemblance de début de traitement
+                if treat_val == 1:
+                    prev_treat = row.get("prev_treat_flag", None)
+                    # prev_treat_flag doit être calculé avant appel
+                    if prev_treat is not None and prev_treat == 0:
+                        dur_v = float(row["dur"]) if pd.notna(row.get("dur")) else self.dur_median_
+                        tb = _assign_bin_scalar(float(T_repr), _TREAT_T_EDGES)
+                        db = _assign_bin_scalar(dur_v, _TREAT_DUR_EDGES)
+                        if 0 <= tb < len(_TREAT_T_EDGES) - 1 and 0 <= db < len(_TREAT_DUR_EDGES) - 1:
+                            p_treat = self.treat_start_prob_[tb, db]
+                            log_post += np.log(max(p_treat, 1e-30))
+
+            # Normaliser le log-posterior (stabilisation numérique)
+            log_post -= log_post.max()
+            posterior = np.exp(log_post)
+            posterior /= posterior.sum()
+
+            # Moments de T à chaque visite
+            for visit_i, vi in enumerate(idx):
+                x_v = float(x_pat[visit_i])
+                x2_v = float(x_v ** 2 - x2_mean)
+
+                # E[T] et Var[T]
+                T_grid = (
+                    _L_GRID[:, None, None]
+                    + _S_GRID[None, :, None] * x_v
+                    + _C_GRID[None, None, :] * x2_v
+                )
+                # E[T]
+                et = float(np.sum(posterior * T_grid))
+                et2 = float(np.sum(posterior * T_grid ** 2))
+                vt = max(et2 - et ** 2, 0.0)
+                post_mean[vi] = et
+                post_sd[vi] = float(np.sqrt(vt))
+
+        return np.stack([post_mean, post_sd], axis=1)
+
+    def _add_prev_treat_flag(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ajoute prev_treat_flag (1 si visite précédente traitée, 0 sinon)."""
+        out = df.copy()
+        out["prev_treat_flag"] = (
+            out.groupby("patient_id")["treat"].shift(1).fillna(0).astype(int)
+        )
+        return out
+
+
+# ---------------------------------------------------------------------------
 # Bloc 6 — Post-traitement par patient
 # ---------------------------------------------------------------------------
 
@@ -507,6 +1044,11 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         Régularisation L2.
     random_state : int
         Graine aléatoire.
+    sens_neighbors : bool
+        Si True, la sensibilité au médicament utilise un a priori bayésien
+        emprunté aux voisins en age_at_diagnosis dans le train.
+    use_posterior : bool
+        Si True, OneSidedPosterior est empilé hors pli (post_mean, post_sd).
     """
 
     def __init__(
@@ -517,6 +1059,8 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         min_samples_leaf: int = 40,
         l2_regularization: float = 1.0,
         random_state: int = 0,
+        sens_neighbors: bool = False,
+        use_posterior: bool = False,
     ):
         self.learning_rate = learning_rate
         self.max_iter = max_iter
@@ -524,6 +1068,8 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         self.min_samples_leaf = min_samples_leaf
         self.l2_regularization = l2_regularization
         self.random_state = random_state
+        self.sens_neighbors = sens_neighbors
+        self.use_posterior = use_posterior
 
     def _sorted_idx(self, X: pd.DataFrame) -> np.ndarray:
         """Retourne les indices positionnels de X triés par patient_id puis age."""
@@ -536,7 +1082,11 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
     def _build_features(self, X_sorted: pd.DataFrame) -> pd.DataFrame:
         """Construit toutes les variables à partir du df trié (blocs 1 à 4)."""
         df = _block1_visit_features(X_sorted)
-        df = _add_on_equivalent(df, self.drug_curve_)
+        df = _add_on_equivalent(
+            df, self.drug_curve_,
+            sens_neighbors=self.sens_neighbors,
+            sens_ref=self.sens_ref_ if self.sens_neighbors else None,
+        )
         df = _apply_corrections(
             df,
             self.rater_lines_,
@@ -552,7 +1102,16 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
     def _select_features(self, df: pd.DataFrame) -> tuple[pd.DataFrame, list, int | None]:
         """Sélectionne les colonnes pour le booster selon les listes fixes."""
         env_cols = [c for c in df.columns if c.startswith("env_")]
-        feature_cols = BASE_COLS + POOL_COLS + TREAT_COLS + env_cols
+        extra_cols = []
+        if self.sens_neighbors and "sens_prior" in df.columns:
+            extra_cols.append("sens_prior")
+        if self.use_posterior:
+            if "post_mean" in df.columns:
+                extra_cols.append("post_mean")
+            if "post_sd" in df.columns:
+                extra_cols.append("post_sd")
+
+        feature_cols = BASE_COLS + POOL_COLS + TREAT_COLS + extra_cols + env_cols
 
         # Garder uniquement les colonnes présentes dans df
         feature_cols = [c for c in feature_cols if c in df.columns]
@@ -574,7 +1133,18 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
 
         # Bloc 2 : courbe médicament apprise sur le pli d'entraînement (sans cible)
         self.drug_curve_ = _fit_drug_curve(df)
-        df = _add_on_equivalent(df, self.drug_curve_)
+
+        # Table de référence sens_neighbors
+        if self.sens_neighbors:
+            self.sens_ref_ = _fit_sens_reference(df, self.drug_curve_)
+        else:
+            self.sens_ref_ = None
+
+        df = _add_on_equivalent(
+            df, self.drug_curve_,
+            sens_neighbors=self.sens_neighbors,
+            sens_ref=self.sens_ref_,
+        )
 
         # Bloc 3 : corrections avec la cible
         self.rater_lines_ = _fit_rater_off_line(df, y_sorted)
@@ -592,6 +1162,39 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         df = _fit_patient_line(df)
         df = _patient_summary_features(df)
         df = _envelope_features(df)
+
+        # Bloc 7 : OneSidedPosterior empilé hors pli
+        if self.use_posterior:
+            post_mean_oof = np.zeros(len(df))
+            post_sd_oof = np.full(len(df), 10.0)
+
+            # GroupKFold interne à 3 plis sur patient_id
+            gkf3 = GroupKFold(n_splits=3)
+            groups = X_sorted["patient_id"].values
+            df_with_target = df.copy()
+            df_with_target["_target_"] = y_sorted.values
+
+            for tr_idx, val_idx in gkf3.split(df, y_sorted, groups=groups):
+                df_tr = df_with_target.iloc[tr_idx]
+                df_val = df.iloc[val_idx]
+
+                osp = OneSidedPosterior()
+                osp.fit(df_tr, df_tr["_target_"])
+
+                # Ajouter prev_treat_flag pour la vraisemblance de début de traitement
+                df_val_pt = osp._add_prev_treat_flag(df_val)
+                preds_val = osp.predict(df_val_pt)
+                post_mean_oof[val_idx] = preds_val[:, 0]
+                post_sd_oof[val_idx] = preds_val[:, 1]
+
+            df["post_mean"] = post_mean_oof
+            df["post_sd"] = post_sd_oof
+
+            # Entraîner un OneSidedPosterior sur tout le train pour predict
+            self.posterior_ = OneSidedPosterior()
+            self.posterior_.fit(df_with_target, y_sorted)
+        else:
+            self.posterior_ = None
 
         # Bloc 5
         feat_df, self.feature_cols_, rater_idx = self._select_features(df)
@@ -616,6 +1219,14 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         X_sorted = X.iloc[sidx].reset_index(drop=True)
 
         df = self._build_features(X_sorted)
+
+        # Bloc 7 : posterior depuis le modèle entraîné sur tout le train
+        if self.use_posterior and self.posterior_ is not None:
+            df_pt = self.posterior_._add_prev_treat_flag(df)
+            post_preds = self.posterior_.predict(df_pt)
+            df["post_mean"] = post_preds[:, 0]
+            df["post_sd"] = post_preds[:, 1]
+
         feat_df = df[self.feature_cols_]
         raw_preds = self.booster_.predict(feat_df.values)
 
@@ -668,8 +1279,12 @@ class SeedEnsembleRegressor(BaseEstimator, RegressorMixin):
 # ---------------------------------------------------------------------------
 
 
-def build_learner(data_preview: pd.DataFrame | None = None) -> object:
-    """Construit le SkrubLearner pour l'expérience 02 (non entraîné)."""
+def build_learner(
+    data_preview: pd.DataFrame | None = None,
+    sens_neighbors: bool = False,
+    use_posterior: bool = False,
+) -> object:
+    """Construit le SkrubLearner (non entraîné)."""
     if data_preview is not None:
         data = skrub.var("data", value=data_preview)
     else:
@@ -681,7 +1296,13 @@ def build_learner(data_preview: pd.DataFrame | None = None) -> object:
     )
     y = data["target"].skb.mark_as_y()
 
-    predictions = X.skb.apply(TrueOffEnvelopeRegressor(), y=y)
+    predictions = X.skb.apply(
+        TrueOffEnvelopeRegressor(
+            sens_neighbors=sens_neighbors,
+            use_posterior=use_posterior,
+        ),
+        y=y,
+    )
     return predictions.skb.make_learner()
 
 
