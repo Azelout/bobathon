@@ -69,3 +69,14 @@ See [SETUP.md step 5](docs/SETUP.md#5-install-skore-and-check-your-setup) for de
 ## Submission rules
 
 All code must be written and run in **Bob** (IDE or CLI), with evaluation through **skore**. Every Kaggle upload must put a Skore Hub EstimatorReport URL (`https://skore.probabl.ai/…`) in the Submission Description, and each Submission needs a **new** report key (`01_dummy`, `02_ridge`, …). Each experiment writes its file to `submissions/<report-key>.csv` (e.g. `submissions/02_ridge.csv`), so the filename matches the report key and a later model never overwrites an earlier submission. See the [competition rules](https://www.kaggle.com/competitions/bobathon-esilv/rules) for eligibility and what makes a Submission valid.
+
+
+## Bundle your code
+
+From the repository root, run:
+
+```bash
+python scripts/bundle.py
+```
+
+This writes `bobathon-esilv.zip` in the repository. The zip contains the code you wrote and leaves out the competition data, secrets, and generated files. Hand in that zip.
