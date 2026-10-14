@@ -12,8 +12,8 @@ stem).
 
 - **Project / dataset:** Parkinson's Disease UPDRS score prediction (hackathon clinical dataset)
 - **Goal:** Predict the debiased true OFF MDS-UPDRS motor score for every visit (regression)
-- **Last experiment:** `02_true_off_envelope` - 2026-10-14
-- **Last result:** RMSE ≈ 2,897 ± 0,054 (GroupKFold 5 plis) — EstimatorReport fold 1 : https://skore.probabl.ai/thr_bob/bobathon-esilv/estimators/76780
+- **Last experiment:** `03_hgb_tuned` — done
+- **Last result:** RMSE = 2,827 ± 0,050 (GroupKFold 5 plis) — https://skore.probabl.ai/thr_bob/bobathon-esilv/cross-validations/80138
 
 <!--
 Workspace decisions: one-time project-setup choices. Record each when
@@ -55,6 +55,8 @@ Status values: planned | approved | running | done | abandoned.
 | Stem | Intent (one line) | Status | Headline result | Design note |
 |---|---|---|---|---|
 | `02_true_off_envelope` | TrueOffEnvelopeRegressor — blocs 1-6, enveloppe 90 cols | done | RMSE = 2,897 ± 0,054 — submission `submissions/02_true_off_envelope.csv` | [design note](02_true_off_envelope.md) |
+| `03_hgb_tuned` | HGB accordé (iter=1000, leaves=63) + ensemble 3 graines | done — meilleur résultat courant, submission soumise | RMSE = 2,827 ± 0,050 — submission `submissions/03_hgb_tuned.csv` | [design note](03_hgb_tuned.md) |
+| `03_debias_wls` | Pivot vers nouvelle modélisation : WLS/stacking testés, non concluants — meilleur = 03_hgb_tuned | done | RMSE 2,827 ± 0,050 (même que 03_hgb_tuned) | [design note](03_debias_wls.md) |
 
 ## Backlog
 
