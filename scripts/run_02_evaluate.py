@@ -7,6 +7,7 @@ Pushes the resulting CrossValidationReport to Skore Hub under the key
 Usage:
     python scripts/run_02_evaluate.py
 """
+
 import time
 
 import pandas as pd

@@ -8,6 +8,7 @@ Expected gain: ~0.64 RMSE points (see journal/STRATEGIE.md section 4.4).
 Usage:
     python scripts/diag_02_ablation.py
 """
+
 import time
 
 import numpy as np
@@ -18,12 +19,12 @@ from sklearn.model_selection import GroupKFold
 from parkinson import PROJECT_ROOT
 from parkinson.estimator import (
     TrueOffEnvelopeRegressor,
-    _block1_visit_features,
     _add_on_equivalent,
     _apply_corrections,
+    _block1_visit_features,
+    _envelope_features,
     _fit_patient_line,
     _patient_summary_features,
-    _envelope_features,
     _postprocess_predictions,
 )
 
@@ -55,7 +56,9 @@ X_va_s = X_va.iloc[sidx].reset_index(drop=True)
 
 df = _block1_visit_features(X_va_s)
 df = _add_on_equivalent(df, model.drug_curve_)
-df = _apply_corrections(df, model.rater_lines_, model.on_effect_, model.on_offset_, model.rater_q95_)
+df = _apply_corrections(
+    df, model.rater_lines_, model.on_effect_, model.on_offset_, model.rater_q95_
+)
 df = _fit_patient_line(df)
 df = _patient_summary_features(df)
 df_env = _envelope_features(df)
@@ -78,7 +81,9 @@ y_tr_s = pd.Series(y_tr.to_numpy()[sidx_tr])
 
 df_tr = _block1_visit_features(X_tr_s)
 df_tr = _add_on_equivalent(df_tr, model.drug_curve_)
-df_tr = _apply_corrections(df_tr, model.rater_lines_, model.on_effect_, model.on_offset_, model.rater_q95_)
+df_tr = _apply_corrections(
+    df_tr, model.rater_lines_, model.on_effect_, model.on_offset_, model.rater_q95_
+)
 df_tr = _fit_patient_line(df_tr)
 df_tr = _patient_summary_features(df_tr)
 df_tr_env = _envelope_features(df_tr)

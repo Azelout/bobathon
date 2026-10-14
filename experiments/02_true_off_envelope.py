@@ -76,9 +76,7 @@ project.put("02_true_off_envelope", report)
 
 # %%
 gkf = GroupKFold(n_splits=5)
-train_idx, val_idx = next(
-    gkf.split(X_train, y_train, groups=X_train["patient_id"])
-)
+train_idx, val_idx = next(gkf.split(X_train, y_train, groups=X_train["patient_id"]))
 
 X_tr_fold = train.iloc[train_idx].reset_index(drop=True)
 X_val_fold = train.iloc[val_idx].reset_index(drop=True)

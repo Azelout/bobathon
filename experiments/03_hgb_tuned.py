@@ -18,7 +18,6 @@ from sklearn.model_selection import GroupKFold
 from parkinson import PROJECT_ROOT
 from parkinson.estimator import (
     SeedEnsembleRegressor,
-    TrueOffEnvelopeRegressor,
     build_learner_03,
 )
 from parkinson.hub import load_skore_credentials
@@ -66,9 +65,7 @@ project.put("03_hgb_tuned", report)
 
 # %%
 gkf = GroupKFold(n_splits=5)
-train_idx, val_idx = next(
-    gkf.split(X_train, y_train, groups=X_train["patient_id"])
-)
+train_idx, val_idx = next(gkf.split(X_train, y_train, groups=X_train["patient_id"]))
 
 X_tr_fold = train.iloc[train_idx].reset_index(drop=True)
 X_val_fold = train.iloc[val_idx].reset_index(drop=True)

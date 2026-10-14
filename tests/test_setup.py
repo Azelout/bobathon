@@ -15,7 +15,6 @@ to redo.
 from __future__ import annotations
 
 import json
-import sqlite3
 import sys
 import textwrap
 import urllib.error
@@ -126,7 +125,9 @@ def test_bob_skills_are_installed():
         )
 
     missing = [
-        name for name in EXPECTED_SKILLS if not (SKILLS_DIR / name / "SKILL.md").is_file()
+        name
+        for name in EXPECTED_SKILLS
+        if not (SKILLS_DIR / name / "SKILL.md").is_file()
     ]
     if missing:
         setup_fail(
@@ -135,7 +136,8 @@ def test_bob_skills_are_installed():
         )
 
     installed = sorted(
-        p.name for p in SKILLS_DIR.iterdir()
+        p.name
+        for p in SKILLS_DIR.iterdir()
         if p.is_dir() and (p / "SKILL.md").is_file()
     )
     if installed != EXPECTED_SKILLS:
@@ -199,12 +201,7 @@ def test_hub_accepts_the_api_key():
 
 
 def _same_workspace(project_id: str) -> bool:
-    path = (
-        project_id.removeprefix("file:")
-        .lstrip("/")
-        .replace("\\", "/")
-        .lower()
-    )
+    path = project_id.removeprefix("file:").lstrip("/").replace("\\", "/").lower()
     return path == REPO_ROOT.as_posix().lstrip("/").lower()
 
 

@@ -1,8 +1,10 @@
-import pandas as pd
-import numpy as np
-from parkinson.estimator import DebiasWLSRegressor
-from sklearn.model_selection import GroupKFold
 import time
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import GroupKFold
+
+from parkinson.estimator import DebiasWLSRegressor
 
 X = pd.read_csv("data/X_train.csv")
 y = pd.read_csv("data/y_train.csv")["target"]
@@ -23,5 +25,5 @@ p = m.predict(X_val)
 t2 = time.time()
 rmse = float(np.sqrt(np.mean((p - y_val.values) ** 2)))
 print(f"RMSE fold 0: {rmse:.4f}")
-print(f"fit: {t1-t0:.1f}s  predict: {t2-t1:.1f}s")
+print(f"fit: {t1 - t0:.1f}s  predict: {t2 - t1:.1f}s")
 print(f"preds: min={p.min():.1f}  max={p.max():.1f}  finite={np.all(np.isfinite(p))}")

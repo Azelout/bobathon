@@ -10,9 +10,11 @@ Implémente les six blocs de la stratégie décrite dans journal/STRATEGIE.md :
 6. Post-traitement par patient : parabole → isotonique → clip [0, 132]
 
 Options supplémentaires (expérience 03) :
-- sens_neighbors : a priori bayésien de sensibilité emprunté aux voisins en âge au diagnostic.
+- sens_neighbors : a priori bayésien de sensibilité emprunté aux voisins
+  en âge au diagnostic.
 - use_posterior : OneSidedPosterior empilé hors pli (post_mean, post_sd).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -31,7 +33,23 @@ from sklearn.model_selection import GroupKFold
 HBIN_EDGES = [-2.0, -0.5, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 7.0]
 
 # Tranches fines (pour la courbe médicament off/on)
-HB_EDGES = [-2.0, -0.5, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 7.0]
+HB_EDGES = [
+    -2.0,
+    -0.5,
+    0.1,
+    0.2,
+    0.3,
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    7.0,
+]
 
 # Valeur sentinelle pour les délais manquants
 DELAY_FILL = -1.0
@@ -82,12 +100,7 @@ def _block1_visit_features(df: pd.DataFrame) -> pd.DataFrame:
     out["dur"] = df["age"] - df["age_at_diagnosis"]
 
     # Encodages catégoriels fixes
-    out["rater"] = (
-        df["rater_id"]
-        .str.extract(r"(\d+)")[0]
-        .astype(float)
-        .astype("Int64")
-    )
+    out["rater"] = df["rater_id"].str.extract(r"(\d+)")[0].astype(float).astype("Int64")
     out["coh"] = (df["cohort"] == "B").astype(int)
     out["gene_c"] = df["gene"].map(GENE_MAP).fillna(-1).astype(int)
 
@@ -117,9 +130,7 @@ def _block1_visit_features(df: pd.DataFrame) -> pd.DataFrame:
 
     out["dur_treat"] = out["age_first_treat"] - df["age_at_diagnosis"]
 
-    out["n_treat"] = df.groupby("patient_id")["on"].transform(
-        lambda s: s.notna().sum()
-    )
+    out["n_treat"] = df.groupby("patient_id")["on"].transform(lambda s: s.notna().sum())
 
     return out
 
@@ -136,13 +147,17 @@ def _fit_drug_curve(df: pd.DataFrame) -> dict:
 
     Retourne un dict {bin_index: median_log_ratio}.
     """
-    doubles = df[df["off"].notna() & df["on"].notna() & (df["off"] >= 8) & (df["on"] >= 1)].copy()
+    doubles = df[
+        df["off"].notna() & df["on"].notna() & (df["off"] >= 8) & (df["on"] >= 1)
+    ].copy()
     doubles["log_ratio"] = np.log(doubles["on"] / doubles["off"])
     curve = doubles.groupby("hb")["log_ratio"].median().to_dict()
     return curve
 
 
-def _fit_sens_reference(df: pd.DataFrame, curve: dict, lam: float = 1.0) -> pd.DataFrame:
+def _fit_sens_reference(
+    df: pd.DataFrame, curve: dict, lam: float = 1.0
+) -> pd.DataFrame:
     """
     Construit la table de référence des patients avec au moins une visite double.
 
@@ -190,14 +205,16 @@ def _compute_sens_prior(
     """
     prior = np.zeros(len(patient_ages))
 
-    # Construire un mapping patient_id → age_at_diagnosis (représentant unique par patient)
+    # Construire un mapping patient_id → age_at_diagnosis
+    # (représentant unique par patient)
     # et patient_id → sum_residuals, count pour éviter l'auto-influence
     ref_pid = ref["patient_id"].values
     ref_age = ref["age_at_diagnosis"].values
     ref_r = ref["r_j"].values
     ref_w = ref["w_j"].values
 
-    # Index de la table de référence par patient_id (pour l'exclusion du patient lui-même)
+    # Index de la table de référence par patient_id
+    # (pour l'exclusion du patient lui-même)
     ref_pid_set = {pid: i for i, pid in enumerate(ref_pid)}
 
     for row_i in range(len(patient_ages)):
@@ -232,7 +249,8 @@ def _add_on_equivalent(
     sens_ref: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
-    Calcule la sensibilité par patient (shrunk mean residual) et on_eq = on * exp(-(courbe+sens)).
+    Calcule la sensibilité par patient (shrunk mean residual)
+    et on_eq = on * exp(-(courbe+sens)).
 
     Si sens_neighbors=True, la sensibilité utilise un a priori bayésien emprunté aux
     patients d'entraînement voisins en age_at_diagnosis (table sens_ref fournie en fit).
@@ -386,7 +404,8 @@ def _apply_corrections(
 
 def _fit_patient_line(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Ajuste une droite pondérée par patient sur off_c et on_c en fonction de t_rel centré.
+    Ajuste une droite pondérée par patient sur off_c et on_c
+    en fonction de t_rel centré.
 
     Chaque mesure disponible (off_c ou on_c) contribue indépendamment. Une visite avec
     les deux mesures compte deux fois.
@@ -398,8 +417,8 @@ def _fit_patient_line(df: pd.DataFrame) -> pd.DataFrame:
     pslope = np.full(len(df), np.nan)
     pres = np.full(len(df), np.nan)
 
-    LAM = 1.0 / 1.35 ** 2   # pénalité de pente
-    B0 = 2.5                  # a priori de pente
+    LAM = 1.0 / 1.35**2  # pénalité de pente
+    B0 = 2.5  # a priori de pente
 
     for pid, grp in df.groupby("patient_id"):
         idx = grp.index.to_numpy()
@@ -419,23 +438,27 @@ def _fit_patient_line(df: pd.DataFrame) -> pd.DataFrame:
         level = max(level, 5.0)
 
         # Poids différenciés : off_c moins bruité que on_c
-        W = np.concatenate([
-            np.full((~np.isnan(mo)).sum(), 1.0 / (2.0 + 0.17 * level) ** 2),
-            np.full((~np.isnan(mn)).sum(), 1.0 / (0.45 * level) ** 2),
-        ])
+        W = np.concatenate(
+            [
+                np.full((~np.isnan(mo)).sum(), 1.0 / (2.0 + 0.17 * level) ** 2),
+                np.full((~np.isnan(mn)).sum(), 1.0 / (0.45 * level) ** 2),
+            ]
+        )
 
         # Système normal avec pénalité sur la pente
         sw = W.sum()
         swt = (W * T).sum()
-        swt2 = (W * T ** 2).sum()
+        swt2 = (W * T**2).sum()
         swv = (W * M).sum()
         swvt = (W * T * M).sum()
         w_mean = W.mean()
 
-        A = np.array([
-            [sw, swt],
-            [swt, swt2 + LAM * w_mean],
-        ])
+        A = np.array(
+            [
+                [sw, swt],
+                [swt, swt2 + LAM * w_mean],
+            ]
+        )
         rhs = np.array([swv, swvt + LAM * w_mean * B0])
         a, b = np.linalg.solve(A + 1e-9 * np.eye(2), rhs)
 
@@ -455,7 +478,9 @@ def _fit_patient_line(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _patient_summary_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcule n_off, n_on, médiane de off_c/on_c, off_c de la visite précédente/suivante."""
+    """Calcule n_off, n_on, médiane de off_c/on_c,
+    off_c de la visite précédente/suivante.
+    """
     out = df.copy()
     g = df.groupby("patient_id")
 
@@ -509,8 +534,7 @@ def _envelope_features(df: pd.DataFrame) -> pd.DataFrame:
 
             # projected[v, slope_i, j] = valid_vals[j] + slopes[slope_i] * age_diff[v,j]
             projected = (
-                valid_vals[None, None, :]
-                + slopes[None, :, None] * age_diff[:, None, :]
+                valid_vals[None, None, :] + slopes[None, :, None] * age_diff[:, None, :]
             )  # shape (V, S, M)
 
             sorted_proj = np.sort(projected, axis=2)[:, :, ::-1]  # shape (V, S, M)
@@ -536,9 +560,9 @@ def _envelope_features(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 # Grilles
-_L_GRID = np.arange(0.0, 130.5, 0.5)   # 261 valeurs
+_L_GRID = np.arange(0.0, 130.5, 0.5)  # 261 valeurs
 _S_GRID = np.arange(0.0, 12.25, 0.25)  # 49 valeurs
-_C_GRID = np.arange(-0.3, 0.31, 0.1)   # 7 valeurs
+_C_GRID = np.arange(-0.3, 0.31, 0.1)  # 7 valeurs
 
 # Tranches de cible pour la densité de bruit
 _T_EDGES = [0.0, 10.0, 20.0, 30.0, 45.0, 60.0, np.inf]
@@ -548,7 +572,9 @@ _TREAT_T_EDGES = [0.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0, 40.0, np.inf]
 _TREAT_DUR_EDGES = [-np.inf, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, np.inf]
 
 
-def _smooth_density(counts: np.ndarray, sigma_bins: float = 2.5, floor: float = 0.02) -> np.ndarray:
+def _smooth_density(
+    counts: np.ndarray, sigma_bins: float = 2.5, floor: float = 0.02
+) -> np.ndarray:
     """Lisse un histogramme par noyau gaussien discret (±3σ tronqué)."""
     half = int(np.ceil(3 * sigma_bins))
     kernel_x = np.arange(-half, half + 1)
@@ -599,7 +625,7 @@ class OneSidedPosterior(BaseEstimator):
     None — tous les paramètres sont appris dans fit.
     """
 
-    def fit(self, df: pd.DataFrame, y: pd.Series) -> "OneSidedPosterior":
+    def fit(self, df: pd.DataFrame, y: pd.Series) -> OneSidedPosterior:
         """
         Apprend les densités de bruit, la table de traitement et les a priori.
 
@@ -611,14 +637,17 @@ class OneSidedPosterior(BaseEstimator):
         y_arr = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
 
         # ------------------------------------------------------------------
-        # Échelle par évaluateur : médiane de off/cible sur visites avec off et cible > 20
+        # Échelle par évaluateur : médiane de off/cible
+        # sur visites avec off et cible > 20
         # ------------------------------------------------------------------
         df2 = df.copy()
         df2["target"] = y_arr
         valid_scale = df2[df2["off"].notna() & (df2["target"] > 20)].copy()
         valid_scale["ratio"] = valid_scale["off"] / valid_scale["target"]
         self.rater_scale_ = valid_scale.groupby("rater_id")["ratio"].median().to_dict()
-        self.global_scale_ = float(valid_scale["ratio"].median()) if len(valid_scale) > 0 else 1.0
+        self.global_scale_ = (
+            float(valid_scale["ratio"].median()) if len(valid_scale) > 0 else 1.0
+        )
 
         # ------------------------------------------------------------------
         # Densités empiriques de bruit pour off
@@ -640,7 +669,9 @@ class OneSidedPosterior(BaseEstimator):
                 sub_t = sub[(sub["target"] >= t_lo) & (sub["target"] < t_hi)]
                 if len(sub_t) < 5:
                     sub_t = sub  # fallback global
-                scale_vals = sub_t["rater_id"].map(self.rater_scale_).fillna(self.global_scale_)
+                scale_vals = (
+                    sub_t["rater_id"].map(self.rater_scale_).fillna(self.global_scale_)
+                )
                 T_proxy = sub_t["target"].values
                 T_clamped = np.maximum(T_proxy, 0.5)
                 z = sub_t["off"].values / (scale_vals.values * T_clamped)
@@ -659,9 +690,7 @@ class OneSidedPosterior(BaseEstimator):
                     t_lo = _T_EDGES[t_bin_i]
                     t_hi = _T_EDGES[t_bin_i + 1]
                     sub = df2[
-                        df2["off"].isna()
-                        & df2["on_eq"].notna()
-                        & (df2["target"] > 0)
+                        df2["off"].isna() & df2["on_eq"].notna() & (df2["target"] > 0)
                     ].copy()
                     if time_known:
                         sub = sub[sub["time_since_intake_on"].notna()]
@@ -677,7 +706,11 @@ class OneSidedPosterior(BaseEstimator):
                     if len(sub_t) == 0:
                         self.on_densities_[key].append(np.ones(201) / (201 * 0.01))
                         continue
-                    scale_vals = sub_t["rater_id"].map(self.rater_scale_).fillna(self.global_scale_)
+                    scale_vals = (
+                        sub_t["rater_id"]
+                        .map(self.rater_scale_)
+                        .fillna(self.global_scale_)
+                    )
                     T_proxy = sub_t["target"].values
                     T_clamped = np.maximum(T_proxy, 0.5)
                     z = sub_t["on_eq"].values / (scale_vals.values * T_clamped)
@@ -692,16 +725,22 @@ class OneSidedPosterior(BaseEstimator):
         # Détecter les visites de "début de traitement" :
         # treat=1 et visite précédente du même patient est treat=0 (ou première visite)
         df_sorted = df2.sort_values(["patient_id", "age"])
-        df_sorted["prev_treat"] = df_sorted.groupby("patient_id")["treat"].shift(1).fillna(0)
+        df_sorted["prev_treat"] = (
+            df_sorted.groupby("patient_id")["treat"].shift(1).fillna(0)
+        )
         onset = df_sorted[
             (df_sorted["treat"] == 1) & (df_sorted["prev_treat"] == 0)
         ].copy()
 
         # Médiane de dur pour les dur manquantes
-        self.dur_median_ = float(df2["dur"].median()) if df2["dur"].notna().any() else 0.0
+        self.dur_median_ = (
+            float(df2["dur"].median()) if df2["dur"].notna().any() else 0.0
+        )
 
         # Table de succès / effectif
-        self.treat_start_table_ = np.zeros((n_treat_t, n_treat_dur, 2))  # [:, :, 0]=succès [:, :, 1]=effectif
+        self.treat_start_table_ = np.zeros(
+            (n_treat_t, n_treat_dur, 2)
+        )  # [:, :, 0]=succès [:, :, 1]=effectif
 
         # Pour chaque visite où treat=0, compter les occasions
         non_treat = df_sorted[df_sorted["treat"] == 0].copy()
@@ -724,8 +763,7 @@ class OneSidedPosterior(BaseEstimator):
         # Probabilités de Laplace
         denom = self.treat_start_table_[:, :, 1] + 1.0
         self.treat_start_prob_ = np.clip(
-            (self.treat_start_table_[:, :, 0] + 0.5) / denom,
-            0.003, 0.997
+            (self.treat_start_table_[:, :, 0] + 0.5) / denom, 0.003, 0.997
         )
 
         # ------------------------------------------------------------------
@@ -734,8 +772,12 @@ class OneSidedPosterior(BaseEstimator):
         pat_stats = []
         for pid, grp in df2.groupby("patient_id"):
             t_mean = float(grp["target"].mean())
-            dur_mean = float(grp["dur"].mean()) if grp["dur"].notna().any() else self.dur_median_
-            dur2 = dur_mean ** 2
+            dur_mean = (
+                float(grp["dur"].mean())
+                if grp["dur"].notna().any()
+                else self.dur_median_
+            )
+            dur2 = dur_mean**2
             treat_frac = float(grp["treat"].mean())
             pat_stats.append([1.0, dur_mean, dur2, treat_frac, t_mean])
 
@@ -774,7 +816,9 @@ class OneSidedPosterior(BaseEstimator):
 
         if slopes_list:
             slopes_arr = np.array(slopes_list)
-            counts_s, _ = np.histogram(slopes_arr, bins=len(_S_GRID), range=(_S_GRID[0], _S_GRID[-1]))
+            counts_s, _ = np.histogram(
+                slopes_arr, bins=len(_S_GRID), range=(_S_GRID[0], _S_GRID[-1])
+            )
             counts_s = counts_s.astype(float) + 1.0
             self.prior_S_ = counts_s / counts_s.sum()
         else:
@@ -801,7 +845,9 @@ class OneSidedPosterior(BaseEstimator):
 
         if curv_list:
             curv_arr = np.array(curv_list)
-            counts_c, _ = np.histogram(curv_arr, bins=len(_C_GRID), range=(_C_GRID[0], _C_GRID[-1]))
+            counts_c, _ = np.histogram(
+                curv_arr, bins=len(_C_GRID), range=(_C_GRID[0], _C_GRID[-1])
+            )
             counts_c = counts_c.astype(float) + 1.0
             self.prior_C_ = counts_c / counts_c.sum()
         else:
@@ -828,9 +874,13 @@ class OneSidedPosterior(BaseEstimator):
             x_pat = ages - age_mean  # x = âge − âge moyen
 
             # A priori sur L
-            dur_m = float(grp["dur"].mean()) if grp["dur"].notna().any() else self.dur_median_
+            dur_m = (
+                float(grp["dur"].mean())
+                if grp["dur"].notna().any()
+                else self.dur_median_
+            )
             treat_frac = float(grp["treat"].mean())
-            reg_feat = np.array([1.0, dur_m, dur_m ** 2, treat_frac])
+            reg_feat = np.array([1.0, dur_m, dur_m**2, treat_frac])
             prior_L_mean = float(reg_feat @ self.prior_L_coef_)
             prior_L_sigma = self.prior_L_sigma_
 
@@ -853,15 +903,19 @@ class OneSidedPosterior(BaseEstimator):
 
             # Récupérer l'échelle de l'évaluateur du patient
             rater_id = grp["rater_id"].iloc[0] if "rater_id" in grp.columns else None
-            scale = self.rater_scale_.get(rater_id, self.global_scale_) if rater_id is not None else self.global_scale_
+            scale = (
+                self.rater_scale_.get(rater_id, self.global_scale_)
+                if rater_id is not None
+                else self.global_scale_
+            )
 
             # Calcul de x² moyen du patient
-            x2_mean = float(np.mean(x_pat ** 2))
+            x2_mean = float(np.mean(x_pat**2))
 
             for visit_i, (vi, row) in enumerate(grp.iterrows()):
                 # T(x) = L + S*x + C*(x² − x²_mean)  →  shape (nL, nS, nC)
                 x_v = float(x_pat[visit_i])
-                x2_v = float(x_v ** 2 - x2_mean)
+                x2_v = float(x_v**2 - x2_mean)
 
                 # T_grid[l, s, c] = L_grid[l] + S_grid[s]*x_v + C_grid[c]*x2_v
                 T_grid = (
@@ -886,7 +940,8 @@ class OneSidedPosterior(BaseEstimator):
                     log_lik = np.where(
                         z_off > 2.0,
                         -30.0,
-                        np.log(np.maximum(density[z_idx], 1e-30)) - np.log(scale * T_grid_clamped)
+                        np.log(np.maximum(density[z_idx], 1e-30))
+                        - np.log(scale * T_grid_clamped),
                     )
                     log_post += log_lik
 
@@ -895,13 +950,16 @@ class OneSidedPosterior(BaseEstimator):
                     time_known = pd.notna(row.get("time_since_intake_on"))
                     nboth_pos = int(row.get("nboth", 0)) > 0
                     key = (time_known, nboth_pos)
-                    density = self.on_densities_.get(key, self.on_densities_[(False, False)])[t_bin_i]
+                    density = self.on_densities_.get(
+                        key, self.on_densities_[(False, False)]
+                    )[t_bin_i]
                     z_on = float(row["on_eq"]) / (scale * T_grid_clamped)
                     z_idx = np.clip((z_on / 0.01).astype(int), 0, 200)
                     log_lik = np.where(
                         z_on > 2.0,
                         -30.0,
-                        np.log(np.maximum(density[z_idx], 1e-30)) - np.log(scale * T_grid_clamped)
+                        np.log(np.maximum(density[z_idx], 1e-30))
+                        - np.log(scale * T_grid_clamped),
                     )
                     log_post += log_lik
 
@@ -910,10 +968,17 @@ class OneSidedPosterior(BaseEstimator):
                     prev_treat = row.get("prev_treat_flag", None)
                     # prev_treat_flag doit être calculé avant appel
                     if prev_treat is not None and prev_treat == 0:
-                        dur_v = float(row["dur"]) if pd.notna(row.get("dur")) else self.dur_median_
+                        dur_v = (
+                            float(row["dur"])
+                            if pd.notna(row.get("dur"))
+                            else self.dur_median_
+                        )
                         tb = _assign_bin_scalar(float(T_repr), _TREAT_T_EDGES)
                         db = _assign_bin_scalar(dur_v, _TREAT_DUR_EDGES)
-                        if 0 <= tb < len(_TREAT_T_EDGES) - 1 and 0 <= db < len(_TREAT_DUR_EDGES) - 1:
+                        if (
+                            0 <= tb < len(_TREAT_T_EDGES) - 1
+                            and 0 <= db < len(_TREAT_DUR_EDGES) - 1
+                        ):
                             p_treat = self.treat_start_prob_[tb, db]
                             log_post += np.log(max(p_treat, 1e-30))
 
@@ -925,7 +990,7 @@ class OneSidedPosterior(BaseEstimator):
             # Moments de T à chaque visite
             for visit_i, vi in enumerate(idx):
                 x_v = float(x_pat[visit_i])
-                x2_v = float(x_v ** 2 - x2_mean)
+                x2_v = float(x_v**2 - x2_mean)
 
                 # E[T] et Var[T]
                 T_grid = (
@@ -935,8 +1000,8 @@ class OneSidedPosterior(BaseEstimator):
                 )
                 # E[T]
                 et = float(np.sum(posterior * T_grid))
-                et2 = float(np.sum(posterior * T_grid ** 2))
-                vt = max(et2 - et ** 2, 0.0)
+                et2 = float(np.sum(posterior * T_grid**2))
+                vt = max(et2 - et**2, 0.0)
                 post_mean[vi] = et
                 post_sd[vi] = float(np.sqrt(vt))
 
@@ -998,22 +1063,47 @@ def _postprocess_predictions(preds: np.ndarray, df: pd.DataFrame) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 BASE_COLS = [
-    "sexM", "age_at_diagnosis", "age", "ledd",
-    "time_since_intake_on", "time_since_intake_off",
-    "on", "off",
-    "dur", "t_rel", "vis", "nv", "span",
-    "rater", "coh", "gene_c",
+    "sexM",
+    "age_at_diagnosis",
+    "age",
+    "ledd",
+    "time_since_intake_on",
+    "time_since_intake_off",
+    "on",
+    "off",
+    "dur",
+    "t_rel",
+    "vis",
+    "nv",
+    "span",
+    "rater",
+    "coh",
+    "gene_c",
 ]
 
 POOL_COLS = [
-    "off_c", "on_c", "pool", "pslope", "pres",
-    "n_off", "n_on", "offc_pmed", "onc_pmed",
-    "offc_prev", "offc_next",
+    "off_c",
+    "on_c",
+    "pool",
+    "pslope",
+    "pres",
+    "n_off",
+    "n_on",
+    "offc_pmed",
+    "onc_pmed",
+    "offc_prev",
+    "offc_next",
 ]
 
 TREAT_COLS = [
-    "on_eq", "nboth", "treat", "sens",
-    "t_since_treat", "t_to_lastuntr", "dur_treat", "n_treat",
+    "on_eq",
+    "nboth",
+    "treat",
+    "sens",
+    "t_since_treat",
+    "t_to_lastuntr",
+    "dur_treat",
+    "n_treat",
 ]
 
 
@@ -1083,7 +1173,8 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         """Construit toutes les variables à partir du df trié (blocs 1 à 4)."""
         df = _block1_visit_features(X_sorted)
         df = _add_on_equivalent(
-            df, self.drug_curve_,
+            df,
+            self.drug_curve_,
             sens_neighbors=self.sens_neighbors,
             sens_ref=self.sens_ref_ if self.sens_neighbors else None,
         )
@@ -1099,7 +1190,9 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
         df = _envelope_features(df)
         return df
 
-    def _select_features(self, df: pd.DataFrame) -> tuple[pd.DataFrame, list, int | None]:
+    def _select_features(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, list, int | None]:
         """Sélectionne les colonnes pour le booster selon les listes fixes."""
         env_cols = [c for c in df.columns if c.startswith("env_")]
         extra_cols = []
@@ -1120,7 +1213,7 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
 
         return df[feature_cols], feature_cols, rater_idx
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "TrueOffEnvelopeRegressor":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> TrueOffEnvelopeRegressor:
         """Apprend les corrections et le booster sur les données d'entraînement."""
         sidx = self._sorted_idx(X)
         X_sorted = X.iloc[sidx].reset_index(drop=True)
@@ -1141,7 +1234,8 @@ class TrueOffEnvelopeRegressor(BaseEstimator, RegressorMixin):
             self.sens_ref_ = None
 
         df = _add_on_equivalent(
-            df, self.drug_curve_,
+            df,
+            self.drug_curve_,
             sens_neighbors=self.sens_neighbors,
             sens_ref=self.sens_ref_,
         )
@@ -1261,7 +1355,7 @@ class SeedEnsembleRegressor(BaseEstimator, RegressorMixin):
         self.seeds = seeds if seeds is not None else [0, 1, 2]
         self.base_params = base_params if base_params is not None else {}
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "SeedEnsembleRegressor":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> SeedEnsembleRegressor:
         self.estimators_ = []
         for seed in self.seeds:
             est = TrueOffEnvelopeRegressor(random_state=seed, **self.base_params)
@@ -1307,7 +1401,9 @@ def build_learner(
 
 
 def build_learner_03(data_preview: pd.DataFrame | None = None) -> object:
-    """Construit le SkrubLearner pour l'expérience 03 : HGB accordé + ensemble 3 graines."""
+    """Construit le SkrubLearner pour l'expérience 03 :
+    HGB accordé + ensemble 3 graines.
+    """
     if data_preview is not None:
         data = skrub.var("data", value=data_preview)
     else:
@@ -1366,9 +1462,13 @@ def _fit_debias_factors_full(df: pd.DataFrame, y: pd.Series) -> dict:
     on_f_global = float(sub_on["ratio"].median())
 
     return {
-        "off_f": off_f, "off_f_global": off_f_global,
-        "off_q95": off_q95, "off_q95_global": off_q95_global,
-        "on_f": on_f, "on_f_rater": on_f_rater, "on_f_global": on_f_global,
+        "off_f": off_f,
+        "off_f_global": off_f_global,
+        "off_q95": off_q95,
+        "off_q95_global": off_q95_global,
+        "on_f": on_f,
+        "on_f_rater": on_f_rater,
+        "on_f_global": on_f_global,
     }
 
 
@@ -1455,7 +1555,9 @@ class DebiasEnvelopeRegressor(BaseEstimator, RegressorMixin):
         df = _envelope_features(df)
         return df
 
-    def _select_features(self, df: pd.DataFrame) -> tuple[pd.DataFrame, list, int | None]:
+    def _select_features(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, list, int | None]:
         env_cols = [c for c in df.columns if c.startswith("env_")]
         est_cols = ["est_off", "est_on", "est_any", "w_off", "w_on"]
         feature_cols = BASE_COLS + POOL_COLS + TREAT_COLS + est_cols + env_cols
@@ -1463,7 +1565,7 @@ class DebiasEnvelopeRegressor(BaseEstimator, RegressorMixin):
         rater_idx = feature_cols.index("rater") if "rater" in feature_cols else None
         return df[feature_cols], feature_cols, rater_idx
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "DebiasEnvelopeRegressor":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> DebiasEnvelopeRegressor:
         sidx = self._sorted_idx(X)
         X_sorted = X.iloc[sidx].reset_index(drop=True)
         y_arr = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
@@ -1518,7 +1620,9 @@ class DebiasEnvelopeRegressor(BaseEstimator, RegressorMixin):
 
 
 def build_learner_debias_envelope(data_preview: pd.DataFrame | None = None) -> object:
-    """Construit le SkrubLearner pour l'expérience 03_debias_wls (DebiasEnvelopeRegressor)."""
+    """Construit le SkrubLearner pour l'expérience 03_debias_wls
+    (DebiasEnvelopeRegressor).
+    """
     if data_preview is not None:
         data = skrub.var("data", value=data_preview)
     else:
@@ -1545,7 +1649,13 @@ _ON_TIME_BINS = [-0.01, 0.1, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0]
 
 def _bin_on_time(s: pd.Series) -> pd.Series:
     """Discrétise time_since_intake_on en indices de tranche (sentinelle -1 si NaN)."""
-    binned = pd.cut(s.fillna(-99.0), bins=_ON_TIME_BINS, labels=False, right=True, include_lowest=True)
+    binned = pd.cut(
+        s.fillna(-99.0),
+        bins=_ON_TIME_BINS,
+        labels=False,
+        right=True,
+        include_lowest=True,
+    )
     return binned.fillna(-1).astype(int)
 
 
@@ -1598,7 +1708,7 @@ def _debias_single(val: float, f: float, var: float) -> tuple[float, float]:
     """Retourne (estimation cible, variance de l'estimation)."""
     if f < 1e-6:
         return np.nan, np.inf
-    return val / f, max(var / (f ** 2), 1e-4)
+    return val / f, max(var / (f**2), 1e-4)
 
 
 def _get_factor(key, f_map, f_fallback_map, f_global, rater_id):
@@ -1641,22 +1751,31 @@ def _build_estimates(df: pd.DataFrame, factors: dict) -> pd.DataFrame:
     has_off = np.isfinite(off_vals) & (off_vals > 0)
     for i in np.where(has_off)[0]:
         rid = rater[i]
-        f = factors["off_f"].get(rid, factors["off_f_rater"].get(rid, factors["off_f_global"]))
-        v = factors["off_var"].get(rid, factors["off_var_rater"].get(rid, factors["off_var_global"]))
+        f = factors["off_f"].get(
+            rid, factors["off_f_rater"].get(rid, factors["off_f_global"])
+        )
+        v = factors["off_var"].get(
+            rid, factors["off_var_rater"].get(rid, factors["off_var_global"])
+        )
         if f > 1e-6:
             est_off[i] = off_vals[i] / f
-            w_off[i] = f ** 2 / max(v, 1e-6)
+            w_off[i] = f**2 / max(v, 1e-6)
 
     # --- ON (key = (tbin, rater_id)) ---
     has_on = np.isfinite(on_vals) & (on_vals > 0)
     for i in np.where(has_on)[0]:
-        rid = rater[i]; tb = int(tbin_on[i])
+        rid = rater[i]
+        tb = int(tbin_on[i])
         key = (tb, rid)
-        f = factors["on_f"].get(key, factors["on_f_rater"].get(rid, factors["on_f_global"]))
-        v = factors["on_var"].get(key, factors["on_var_rater"].get(rid, factors["on_var_global"]))
+        f = factors["on_f"].get(
+            key, factors["on_f_rater"].get(rid, factors["on_f_global"])
+        )
+        v = factors["on_var"].get(
+            key, factors["on_var_rater"].get(rid, factors["on_var_global"])
+        )
         if f > 1e-6:
             est_on[i] = on_vals[i] / f
-            w_on[i] = f ** 2 / max(v, 1e-6)
+            w_on[i] = f**2 / max(v, 1e-6)
 
     both = np.isfinite(est_off) & np.isfinite(est_on)
     only_off = np.isfinite(est_off) & ~np.isfinite(est_on)
@@ -1668,10 +1787,13 @@ def _build_estimates(df: pd.DataFrame, factors: dict) -> pd.DataFrame:
     out["est_on"] = est_on
     out["w_on"] = w_on
     out["est"] = np.where(
-        both, (w_off * est_off + w_on * est_on) / (w_off + w_on),
-        np.where(only_off, est_off, np.where(only_on, est_on, np.nan))
+        both,
+        (w_off * est_off + w_on * est_on) / (w_off + w_on),
+        np.where(only_off, est_off, np.where(only_on, est_on, np.nan)),
     )
-    out["w"] = np.where(both, w_off + w_on, np.where(only_off, w_off, np.where(only_on, w_on, 0.0)))
+    out["w"] = np.where(
+        both, w_off + w_on, np.where(only_off, w_off, np.where(only_on, w_on, 0.0))
+    )
     return out
 
 
@@ -1691,18 +1813,28 @@ def _fit_population_prior(df_with_est: pd.DataFrame, y: pd.Series) -> dict:
         if len(grp) >= 3:
             c2, c1, c0 = np.polyfit(a, t, 2)
         elif len(grp) == 2:
-            c1, c0 = np.polyfit(a, t, 1); c2 = 0.0
+            c1, c0 = np.polyfit(a, t, 1)
+            c2 = 0.0
         else:
-            c0 = float(t[0]); c1 = 0.0; c2 = 0.0
-        c0s.append(c0); c1s.append(c1); c2s.append(c2)
+            c0 = float(t[0])
+            c1 = 0.0
+            c2 = 0.0
+        c0s.append(c0)
+        c1s.append(c1)
+        c2s.append(c2)
     return {
-        "c0_mean": float(np.mean(c0s)), "c0_std": max(float(np.std(c0s)), 1.0),
-        "c1_mean": float(np.mean(c1s)), "c1_std": max(float(np.std(c1s)), 0.1),
-        "c2_mean": float(np.mean(c2s)), "c2_std": max(float(np.std(c2s)), 0.01),
+        "c0_mean": float(np.mean(c0s)),
+        "c0_std": max(float(np.std(c0s)), 1.0),
+        "c1_mean": float(np.mean(c1s)),
+        "c1_std": max(float(np.std(c1s)), 0.1),
+        "c2_mean": float(np.mean(c2s)),
+        "c2_std": max(float(np.std(c2s)), 0.01),
     }
 
 
-def _quantile_parabola_per_patient(df: pd.DataFrame, prior: dict, quantile: float = 0.90) -> np.ndarray:
+def _quantile_parabola_per_patient(
+    df: pd.DataFrame, prior: dict, quantile: float = 0.90
+) -> np.ndarray:
     """
     Pour chaque patient, ajuste une parabole en âge centré par régression quantile
     (quantile 90%) sur ses estimations débiaisées, avec shrinkage empirical Bayes.
@@ -1723,10 +1855,14 @@ def _quantile_parabola_per_patient(df: pd.DataFrame, prior: dict, quantile: floa
 
     def _pinball(params, ac, ev, lam0, lam1, lam2, pv, q):
         c0, c1, c2 = params
-        fitted = c0 + c1 * ac + c2 * ac ** 2
+        fitted = c0 + c1 * ac + c2 * ac**2
         resid = ev - fitted
         loss = np.where(resid >= 0, q * resid, (q - 1) * resid).mean()
-        reg = 0.5 * (lam0 * (c0 - pv[0]) ** 2 + lam1 * (c1 - pv[1]) ** 2 + lam2 * (c2 - pv[2]) ** 2)
+        reg = 0.5 * (
+            lam0 * (c0 - pv[0]) ** 2
+            + lam1 * (c1 - pv[1]) ** 2
+            + lam2 * (c2 - pv[2]) ** 2
+        )
         return loss + reg
 
     for pid, grp in df.groupby("patient_id"):
@@ -1744,12 +1880,16 @@ def _quantile_parabola_per_patient(df: pd.DataFrame, prior: dict, quantile: floa
             preds[idx] = np.clip(prior["c0_mean"] + prior["c1_mean"] * ac, 0, 132)
             continue
 
-        ev = est[valid]; acv = ac[valid]
+        ev = est[valid]
+        acv = ac[valid]
 
         if n_valid >= 3:
             res = minimize(
-                _pinball, x0=prior_vec.copy(), args=(acv, ev, lam_c0, lam_c1, lam_c2, prior_vec, quantile),
-                method="Nelder-Mead", options={"xatol": 1e-3, "fatol": 1e-4, "maxiter": 500},
+                _pinball,
+                x0=prior_vec.copy(),
+                args=(acv, ev, lam_c0, lam_c1, lam_c2, prior_vec, quantile),
+                method="Nelder-Mead",
+                options={"xatol": 1e-3, "fatol": 1e-4, "maxiter": 500},
             )
             c0, c1, c2 = res.x
         elif n_valid == 2:
@@ -1758,12 +1898,14 @@ def _quantile_parabola_per_patient(df: pd.DataFrame, prior: dict, quantile: floa
             P = np.diag([lam_c0, lam_c1])
             pv2 = prior_vec[:2]
             coeffs = np.linalg.solve(A.T @ A + P, A.T @ ev + P @ pv2)
-            c0, c1 = coeffs; c2 = prior["c2_mean"]
+            c0, c1 = coeffs
+            c2 = prior["c2_mean"]
         else:
             c0 = (ev[0] * lam_c0 * 5 + prior["c0_mean"] * lam_c0) / (lam_c0 * 6)
-            c1 = prior["c1_mean"]; c2 = prior["c2_mean"]
+            c1 = prior["c1_mean"]
+            c2 = prior["c2_mean"]
 
-        p = c0 + c1 * ac + c2 * ac ** 2
+        p = c0 + c1 * ac + c2 * ac**2
         if len(p) > 1:
             iso = IsotonicRegression(increasing=True, out_of_bounds="clip")
             p = iso.fit_transform(age, p)
@@ -1786,9 +1928,11 @@ class DebiasWLSRegressor(BaseEstimator, RegressorMixin):
     def __init__(self, quantile: float = 0.90):
         self.quantile = quantile
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "DebiasWLSRegressor":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> DebiasWLSRegressor:
         X = X.reset_index(drop=True)
-        y = pd.Series(y.values if hasattr(y, "values") else np.asarray(y), name="target")
+        y = pd.Series(
+            y.values if hasattr(y, "values") else np.asarray(y), name="target"
+        )
 
         order = X.sort_values(["patient_id", "age"]).index.to_numpy()
         Xs = X.iloc[order].reset_index(drop=True)
@@ -1805,7 +1949,9 @@ class DebiasWLSRegressor(BaseEstimator, RegressorMixin):
         Xs = X.iloc[order].reset_index(drop=True)
 
         df_est = _build_estimates(Xs, self.factors_)
-        preds_sorted = _quantile_parabola_per_patient(df_est, self.prior_, self.quantile)
+        preds_sorted = _quantile_parabola_per_patient(
+            df_est, self.prior_, self.quantile
+        )
 
         result = np.empty(len(X))
         result[order] = preds_sorted
@@ -1855,13 +2001,16 @@ class StackingEnvelopeRegressor(BaseEstimator, RegressorMixin):
         self.wls_quantile = wls_quantile
         self.random_state = random_state
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "StackingEnvelopeRegressor":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> StackingEnvelopeRegressor:
         X = X.reset_index(drop=True)
         y_arr = y.to_numpy() if hasattr(y, "to_numpy") else np.asarray(y)
 
         hgb_p = self.hgb_params or {
-            "learning_rate": 0.05, "max_iter": 1000, "max_leaf_nodes": 63,
-            "min_samples_leaf": 20, "l2_regularization": 0.5,
+            "learning_rate": 0.05,
+            "max_iter": 1000,
+            "max_leaf_nodes": 63,
+            "min_samples_leaf": 20,
+            "l2_regularization": 0.5,
         }
 
         # --- Out-of-fold predictions pour apprendre alpha ---
@@ -1887,7 +2036,9 @@ class StackingEnvelopeRegressor(BaseEstimator, RegressorMixin):
         self.alpha_ = np.linalg.solve(A.T @ A + 10 * np.eye(2), A.T @ y_arr)
 
         # --- Modèles finaux entraînés sur tout le train ---
-        self.hgb_final_ = TrueOffEnvelopeRegressor(random_state=self.random_state, **hgb_p)
+        self.hgb_final_ = TrueOffEnvelopeRegressor(
+            random_state=self.random_state, **hgb_p
+        )
         self.hgb_final_.fit(X, pd.Series(y_arr))
 
         self.wls_final_ = DebiasWLSRegressor(quantile=self.wls_quantile)

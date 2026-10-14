@@ -1,7 +1,9 @@
 """
-Tests de garde-fous pour TrueOffEnvelopeRegressor avec sens_neighbors=True, use_posterior=True.
+Tests de garde-fous pour TrueOffEnvelopeRegressor
+avec sens_neighbors=True, use_posterior=True.
 
-Réutilise la même structure que test_02_true_off_envelope.py en paramétrant les deux options.
+Réutilise la même structure que test_02_true_off_envelope.py
+en paramétrant les deux options.
 Les quatre propriétés vérifiées sont identiques :
 1. La prédiction d'un patient est identique seul ou avec d'autres patients.
 2. Mélanger les lignes ne change pas les prédictions.
@@ -9,13 +11,13 @@ Les quatre propriétés vérifiées sont identiques :
 4. La prédiction sur X_test a 11 013 lignes finies avec le même index que
    sample_submission.csv.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from parkinson import PROJECT_ROOT
 from parkinson.estimator import TrueOffEnvelopeRegressor
-
 
 # ---------------------------------------------------------------------------
 # Fixture : sous-ensemble de patients
@@ -34,7 +36,9 @@ def small_dataset():
 
 @pytest.fixture(scope="module")
 def trained_model_03(small_dataset):
-    """Entraîne le modèle 03 (sens_neighbors=True, use_posterior=True) sur 20 patients."""
+    """Entraîne le modèle 03 (sens_neighbors=True, use_posterior=True)
+    sur 20 patients.
+    """
     X_all, y_all = small_dataset
 
     train_pids = X_all["patient_id"].unique()[:20]

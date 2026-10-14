@@ -265,7 +265,9 @@ def write_bundle(root: Path, destination: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> None:
     """Zip this repository, or the repository passed with ``--root``."""
     parser = argparse.ArgumentParser(
-        description="Zip participant code, leaving out lab data, secrets, and generated files."
+        description=(
+            "Zip participant code, leaving out lab data, secrets, and generated files."
+        )
     )
     parser.add_argument(
         "--root",

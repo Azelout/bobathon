@@ -5,10 +5,10 @@
 
 # %%
 import pandas as pd
+import skore
 from sklearn.base import clone
 from sklearn.dummy import DummyRegressor
 
-import skore
 from parkinson import PROJECT_ROOT
 from parkinson.hub import load_skore_credentials
 

@@ -94,7 +94,9 @@ rmse_scores = report.metrics.rmse()
 print(rmse_scores)
 
 # Vérification du seuil d'arrêt
-mean_rmse = float(rmse_scores.mean()) if hasattr(rmse_scores, "mean") else float(rmse_scores)
+mean_rmse = (
+    float(rmse_scores.mean()) if hasattr(rmse_scores, "mean") else float(rmse_scores)
+)
 print(f"RMSE moyenne : {mean_rmse:.3f}")
 
 if mean_rmse > 2.88:
@@ -119,9 +121,7 @@ project.put("03_likelihood_stack", report)
 
 # %%
 gkf = GroupKFold(n_splits=5)
-train_idx, val_idx = next(
-    gkf.split(X_train, y_train, groups=X_train["patient_id"])
-)
+train_idx, val_idx = next(gkf.split(X_train, y_train, groups=X_train["patient_id"]))
 
 X_tr_fold = train.iloc[train_idx].reset_index(drop=True)
 X_val_fold = train.iloc[val_idx].reset_index(drop=True)

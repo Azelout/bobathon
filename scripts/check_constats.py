@@ -46,16 +46,24 @@ print(sub.groupby("tbin", observed=True)["ratio_on"].median().round(3).to_string
 has_off = df["off"].notna() & df["target"].notna() & (df["target"] > 3)
 sub2 = df[has_off].copy()
 sub2["ratio_off"] = sub2["off"] / sub2["target"]
-print(f"\nConstat 3b -- off/target  median: {sub2['ratio_off'].median():.3f}  mean: {sub2['ratio_off'].mean():.3f}")
+off_med = sub2["ratio_off"].median()
+off_mea = sub2["ratio_off"].mean()
+print(f"\nConstat 3b -- off/target  median: {off_med:.3f}  mean: {off_mea:.3f}")
 
 # --- Constat 3c : biais rater ---
 q_off = sub2.groupby("rater_id")["ratio_off"].median()
-print(f"\nConstat 3c -- ratio off/target par rater: min={q_off.min():.3f}  max={q_off.max():.3f}  n_raters={len(q_off)}")
+print(
+    f"\nConstat 3c -- ratio off/target par rater: "
+    f"min={q_off.min():.3f}  max={q_off.max():.3f}  n_raters={len(q_off)}"
+)
 
 sub3 = df[df["on"].notna() & df["target"].notna() & (df["target"] > 3)].copy()
 sub3["ratio_on"] = sub3["on"] / sub3["target"]
 q_on = sub3.groupby("rater_id")["ratio_on"].median()
-print(f"Constat 3c -- ratio on/target par rater:  min={q_on.min():.3f}  max={q_on.max():.3f}")
+print(
+    f"Constat 3c -- ratio on/target par rater: "
+    f"  min={q_on.min():.3f}  max={q_on.max():.3f}"
+)
 
 # Bruit residuel
 sub2["resid"] = sub2["off"] - sub2["ratio_off"].median() * sub2["target"]

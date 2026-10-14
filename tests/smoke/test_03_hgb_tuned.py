@@ -8,6 +8,7 @@ Quatre propriétés vérifiées :
 4. La prédiction sur X_test a 11 013 lignes finies avec le même index que
    sample_submission.csv.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -41,7 +42,9 @@ def small_dataset():
 
 @pytest.fixture(scope="module")
 def trained_model(small_dataset):
-    """Entraîne l'ensemble 03 sur les 20 premiers patients (2 graines pour aller vite)."""
+    """Entraîne l'ensemble 03 sur les 20 premiers patients
+    (2 graines pour aller vite).
+    """
     X_all, y_all = small_dataset
     train_pids = X_all["patient_id"].unique()[:20]
     mask = X_all["patient_id"].isin(train_pids)

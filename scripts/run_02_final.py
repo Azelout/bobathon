@@ -7,6 +7,7 @@ Final steps for experiment 02_true_off_envelope:
 Usage:
     python scripts/run_02_final.py
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -32,9 +33,7 @@ X_test = pd.read_csv(PROJECT_ROOT / "data" / "X_test.csv")
 # ---------------------------------------------------------------------------
 print("=== EstimatorReport on fold 1 ===")
 gkf = GroupKFold(n_splits=5)
-train_idx, val_idx = next(
-    gkf.split(X_train, y_train, groups=X_train["patient_id"])
-)
+train_idx, val_idx = next(gkf.split(X_train, y_train, groups=X_train["patient_id"]))
 
 X_tr_fold = train.iloc[train_idx].reset_index(drop=True)
 X_val_fold = train.iloc[val_idx].reset_index(drop=True)

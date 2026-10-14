@@ -1,7 +1,8 @@
-import pandas as pd
 import numpy as np
-from parkinson.estimator import DebiasEnvelopeRegressor
+import pandas as pd
 from sklearn.model_selection import GroupKFold
+
+from parkinson.estimator import DebiasEnvelopeRegressor
 
 X = pd.read_csv("data/X_train.csv")
 y = pd.read_csv("data/y_train.csv")["target"]

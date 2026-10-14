@@ -9,13 +9,13 @@ Four properties are verified:
 4. Predicting X_test produces 11,013 finite values with the same index as
    sample_submission.csv.
 """
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from parkinson import PROJECT_ROOT
 from parkinson.estimator import TrueOffEnvelopeRegressor
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -51,7 +51,9 @@ def trained_model(small_dataset):
 
 
 def test_patient_isolation(trained_model, small_dataset):
-    """Predicting a patient alone vs. together with other patients gives the same result."""
+    """Predicting a patient alone vs. together with other patients
+    gives the same result.
+    """
     X_all, _ = small_dataset
     model = trained_model
 
@@ -137,7 +139,9 @@ def test_monotone_and_bounds(trained_model, small_dataset):
 
 
 def test_xtest_predictions():
-    """X_test → 11,013 finite predictions with the same index as sample_submission.csv."""
+    """X_test → 11,013 finite predictions with the same index as
+    sample_submission.csv.
+    """
     X_train = pd.read_csv(PROJECT_ROOT / "data" / "X_train.csv")
     y_train = pd.read_csv(PROJECT_ROOT / "data" / "y_train.csv")["target"]
     X_test = pd.read_csv(PROJECT_ROOT / "data" / "X_test.csv")
