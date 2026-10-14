@@ -31,7 +31,7 @@ this block on later sessions avoids re-deciding what's already settled.
   - skore mode: <local | hub | mlflow> - recorded: <YYYY-MM-DD>
   - skore hub workspace: <hub-workspace-name | n/a> - recorded: <YYYY-MM-DD>
   - skore mlflow tracking uri: <mlflow-tracking-uri | n/a> - recorded: <YYYY-MM-DD>
-  - student prior: <beginner | some-sklearn | comfortable> - recorded: <YYYY-MM-DD>
+  - student prior: comfortable - recorded: 2026-10-14
   - CV splitter family: <KFold | StratifiedKFold | GroupKFold | TimeSeriesSplit | other> - recorded: <YYYY-MM-DD>
 
 ## Data understanding (EDA)
