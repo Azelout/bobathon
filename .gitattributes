@@ -1,0 +1,16 @@
+# Normalise line endings to LF in the repo; Git checks out CRLF on Windows.
+* text=auto
+
+# Python files always LF
+*.py text eol=lf
+
+# Markdown always LF
+*.md text eol=lf
+
+# TOML / INI always LF
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# CSV kept as-is
+*.csv binary

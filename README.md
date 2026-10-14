@@ -55,7 +55,7 @@ See [SETUP.md step 5](docs/SETUP.md#5-install-skore-and-check-your-setup) for de
 
 1. Train a **Ridge** linear model, compare it with the dummy, and make your **first Kaggle Submission**.
 2. Switch to **patient-grouped cross-validation** (`GroupKFold`) so the score matches the Kaggle split.
-3. Try **HistGradientBoosting** (missing values as signal), skrub `**tabular_pipeline`** (categorical columns), and skrub **DataOps** (groups baked into the graph).
+3. Try **HistGradientBoosting** (missing values as signal), skrub **`tabular_pipeline`** (categorical columns), and skrub **DataOps** (groups baked into the graph).
 4. Fit your best model on all training visits and **submit again**.
 
 ## Documents

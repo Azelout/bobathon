@@ -25,14 +25,14 @@ this block on later sessions avoids re-deciding what's already settled.
 - **Workspace decisions** (immutable unless the user pivots):
   - tabular library: pandas - recorded: 2025-07-11
   - env manager: pip+venv - recorded: 2025-07-11
-  - agent feature: <installed> - recorded: <YYYY-MM-DD>
-  - optional features: <none> - recorded: <YYYY-MM-DD>
-  - package name (`src/<pkg>/`): <pkg> - recorded: <YYYY-MM-DD>
-  - skore mode: <local | hub | mlflow> - recorded: <YYYY-MM-DD>
-  - skore hub workspace: <hub-workspace-name | n/a> - recorded: <YYYY-MM-DD>
-  - skore mlflow tracking uri: <mlflow-tracking-uri | n/a> - recorded: <YYYY-MM-DD>
-  - student prior: <beginner | some-sklearn | comfortable> - recorded: <YYYY-MM-DD>
-  - CV splitter family: <KFold | StratifiedKFold | GroupKFold | TimeSeriesSplit | other> - recorded: <YYYY-MM-DD>
+  - agent feature: installed - recorded: 2025-07-11
+  - optional features: none - recorded: 2025-07-11
+  - package name (`src/<pkg>/`): parkinson - recorded: 2025-07-11
+  - skore mode: hub - recorded: 2025-07-11
+  - skore hub workspace: bobathon-esilv - recorded: 2025-07-11
+  - skore mlflow tracking uri: n/a - recorded: 2025-07-11
+  - student prior: comfortable - recorded: 2025-07-11
+  - CV splitter family: GroupKFold - recorded: 2025-07-11
 
 ## Data understanding (EDA)
 

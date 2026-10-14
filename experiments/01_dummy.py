@@ -1,12 +1,12 @@
 # %% [markdown]
 # # 01 — Dummy mean baseline
 # Always predicts the training-set mean of `target`.
-# Sets the error floor: every real model must beat this RMSE.
+# Sets the error floor: every real model must beat this RMSE (~16.5).
 
 # %%
 import pandas as pd
-from sklearn.dummy import DummyRegressor
 from sklearn.base import clone
+from sklearn.dummy import DummyRegressor
 
 import skore
 from parkinson import PROJECT_ROOT
@@ -50,6 +50,8 @@ skore.login(mode="hub")
 project = skore.Project(name="bobathon-esilv", mode="hub", workspace=cfg["workspace"])
 project.put("01_dummy", report)
 
+# %% [markdown]
+# ## Generate submission CSV
 
 # %%
 X_test = pd.read_csv(PROJECT_ROOT / "data" / "X_test.csv")
@@ -58,6 +60,7 @@ submission = X_test[["Index"]].copy()
 submission["target"] = final.predict(X_test[feature_cols])
 
 submissions_dir = PROJECT_ROOT / "submissions"
+submissions_dir.mkdir(exist_ok=True)
 submission.to_csv(submissions_dir / "01_dummy.csv", index=False)
 submission.shape
 # %%

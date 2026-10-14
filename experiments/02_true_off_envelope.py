@@ -1,19 +1,18 @@
 # %% [markdown]
-# # 02 — True OFF à enveloppe
+# # 02 — True OFF with envelope features
 #
-# Estimateur unique `TrueOffEnvelopeRegressor` qui implémente les six blocs
-# de la stratégie décrite dans `journal/STRATEGIE.md` (sections 4 et 11) :
+# A single `TrueOffEnvelopeRegressor` implementing the six blocks of the strategy
+# described in `journal/STRATEGIE.md` (sections 4 and 11):
 #
-# 1. Variables de visite et de traitement (sans cible)
-# 2. Conversion de `on` en équivalent `off` (sans cible)
-# 3. Corrections par évaluateur (apprises dans `fit`)
-# 4. Variables par patient : droite pondérée + résumés + enveloppe 90 colonnes
+# 1. Visit and treatment features (target-free)
+# 2. Convert `on` to an off-equivalent (target-free)
+# 3. Rater-level scale corrections (learned in `fit`)
+# 4. Per-patient weighted line + summaries + 90-column envelope
 # 5. HistGradientBoostingRegressor
-# 6. Post-traitement par patient : parabole → isotonique → clip [0, 132]
+# 6. Per-patient post-processing: parabola → isotonic → clip [0, 132]
 #
-# RMSE attendue : ≈ 2,90 (fourchette 2,82–2,95 par pli GroupKFold à 5 plis).
-# L'estimateur et ses fonctions auxiliaires sont définis dans
-# `src/parkinson/estimator.py` pour être correctement picklables.
+# Expected RMSE: ≈ 2.90 (range 2.82–2.95 per GroupKFold fold).
+# The estimator and its helpers live in `src/parkinson/estimator.py`.
 
 # %%
 from __future__ import annotations
@@ -24,44 +23,40 @@ import skore
 from sklearn.model_selection import GroupKFold
 
 from parkinson import PROJECT_ROOT
-from parkinson.estimator import (
-    TrueOffEnvelopeRegressor,
-    build_learner,
-)
+from parkinson.estimator import TrueOffEnvelopeRegressor, build_learner
 from parkinson.hub import load_skore_credentials
 
 # ---------------------------------------------------------------------------
-# Chargement des données
+# Data loading
 # ---------------------------------------------------------------------------
 
 # %%
 X_train = pd.read_csv(PROJECT_ROOT / "data" / "X_train.csv")
 y_train = pd.read_csv(PROJECT_ROOT / "data" / "y_train.csv")["target"]
 
-# Joindre X et y pour le graphe DataOps
+# Merge X and y for the DataOps graph
 train = X_train.copy()
 train["target"] = y_train.values
 
 # %%
-# Vérification rapide des colonnes disponibles
-print("Colonnes X_train :", list(X_train.columns))
-print("Lignes :", len(X_train), "| Patients :", X_train["patient_id"].nunique())
+print("X_train columns:", list(X_train.columns))
+print("Rows:", len(X_train), "| Patients:", X_train["patient_id"].nunique())
 
 # %%
 learner = build_learner(data_preview=train)
 
 # %% [markdown]
-# ## Évaluation croisée GroupKFold à 5 plis
+# ## Cross-validation — GroupKFold 5 folds
 #
-# `skore.evaluate` détecte le `SkrubLearner` et utilise le `cv` et les
-# `split_kwargs` déclarés au niveau du marqueur X.
+# `skore.evaluate` detects the `SkrubLearner` and uses the `cv` and
+# `split_kwargs` declared on the X marker.
 
 # %%
 report = skore.evaluate(learner, data={"data": train})
 print(report.metrics.rmse())
 
 # %% [markdown]
-# ## Push sur le Hub
+# ## Push to Skore Hub
 
 # %%
 cfg = load_skore_credentials()
@@ -74,10 +69,10 @@ project = skore.Project(
 project.put("02_true_off_envelope", report)
 
 # %% [markdown]
-# ## Rapport EstimatorReport sur le premier pli GroupKFold
+# ## EstimatorReport on fold 1
 #
-# Le README exige une URL de rapport EstimatorReport.
-# On utilise le premier pli d'un GroupKFold, jamais une séparation aléatoire.
+# The submission rules require a Skore Hub EstimatorReport URL.
+# We use the first GroupKFold split — never a random holdout.
 
 # %%
 gkf = GroupKFold(n_splits=5)
@@ -88,7 +83,7 @@ train_idx, val_idx = next(
 X_tr_fold = train.iloc[train_idx].reset_index(drop=True)
 X_val_fold = train.iloc[val_idx].reset_index(drop=True)
 
-# Estimateur non fitté : skore le fitte sur X_train/y_train du pli
+# Pass the unfitted estimator — skore fits it on the fold's train split.
 estimator_report = skore.EstimatorReport(
     TrueOffEnvelopeRegressor(),
     X_train=X_tr_fold.drop(columns=["target"]),
@@ -96,12 +91,12 @@ estimator_report = skore.EstimatorReport(
     X_test=X_val_fold.drop(columns=["target"]),
     y_test=X_val_fold["target"],
 )
-print("RMSE premier pli :", estimator_report.metrics.rmse())
+print("RMSE fold 1:", estimator_report.metrics.rmse())
 project.put("02_true_off_envelope_fold1_report", estimator_report)
-print("EstimatorReport poussé : 02_true_off_envelope_fold1_report")
+print("EstimatorReport pushed: 02_true_off_envelope_fold1_report")
 
 # %% [markdown]
-# ## Entraînement sur tout le train et soumission
+# ## Train on the full training set and generate the submission CSV
 
 # %%
 final_model = TrueOffEnvelopeRegressor()
@@ -114,7 +109,7 @@ submission = pd.DataFrame({"Index": X_test["Index"], "target": test_preds})
 submissions_dir = PROJECT_ROOT / "submissions"
 submissions_dir.mkdir(exist_ok=True)
 submission.to_csv(submissions_dir / "02_true_off_envelope.csv", index=False)
-print("Soumission écrite :", submission.shape)
-print("Valeurs finies :", np.isfinite(test_preds).sum(), "/", len(test_preds))
+print("Submission written:", submission.shape)
+print("Finite predictions:", np.isfinite(test_preds).sum(), "/", len(test_preds))
 
 # %%
